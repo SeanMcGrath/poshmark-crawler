@@ -9,6 +9,9 @@ login_URL = main_URL + 'login'
 parties_URL = main_URL + 'parties'
 user_URL = main_URL + 'user'
 
+def noop():
+    pass
+
 
 def make_br():
     br = mechanize.Browser()
@@ -30,24 +33,29 @@ class bcolors:
 
 class UserFollower(pykka.ThreadingActor):
 
-    def __init__(self):
+    def __init__(self, printer, cookies=None, exit_function=noop):
         super(UserFollower, self).__init__()
 
         self.br = make_br()
         self.followed_users = set()
+        self.printer = printer
+        self.exit_function = exit_function
 
-        # Get Credentials
-        POSHMARK_USER = os.getenv('POSHMARKUSER')
-        POSHMARK_PASS = os.getenv('POSHMARKPASS')
+        if cookies:
+            self.br.set_cookiejar(cookies)
 
-        # Log in
-        self.br.open(login_URL)
-        self.br.select_form(nr=2)
-        self.br['login_form[username_email]'] = POSHMARK_USER
-        self.br['login_form[password]'] = POSHMARK_PASS
-        self.br.submit()
-        print 'Logged in'
-        print ''
+        else:
+            # Get Credentials
+            POSHMARK_USER = os.getenv('POSHMARKUSER')
+            POSHMARK_PASS = os.getenv('POSHMARKPASS')
+
+            # Log in
+            self.br.open(login_URL)
+            self.br.select_form(nr=2)
+            self.br['login_form[username_email]'] = POSHMARK_USER
+            self.br['login_form[password]'] = POSHMARK_PASS
+            self.br.submit()
+            print 'Logged in UserFollower'
 
     def on_receive(self, message):
         try:
@@ -65,22 +73,33 @@ class UserFollower(pykka.ThreadingActor):
             try:
                 self.br.follow_link(text_regex='^Follow$', nr=1)
             except Exception as e:
-                print str(e)
-                raise e
+                if '403' in str(e):
+                    print 'Locked out - go to Poshmark and certify you are human!'
+                else:
+                    print str(e)
+                self.exit_function()
+                return
 
         else:
             print 'no follow link'
 
         self.followed_users.add(user)
-        print '{}{}{}\t{}'.format(bcolors.OKGREEN, len(self.followed_users), bcolors.ENDC, user)
+        self.printer.tell({'username': user})
 
 
 class UserFinder(pykka.ThreadingActor):
 
-    def __init__(self, follower):
+    def __init__(self, followers):
         super(UserFinder, self).__init__()
         self.br = make_br()
-        self.follower = follower
+        self.followers = followers
+        self.curr_follower = 0
+
+    @property
+    def next_follower(self):
+        next_follower = self.followers[self.curr_follower]
+        self.curr_follower = (self.curr_follower + 1) % len(self.followers)
+        return next_follower
 
     def begin(self):
         self.br.open(parties_URL)
@@ -114,7 +133,23 @@ class UserFinder(pykka.ThreadingActor):
         return self.get_usernames(following_url)
 
     def send_user(self, user):
-        self.follower.tell({'username': user})
+        self.next_follower.tell({'username': user})
         for username in self.find_following(user):
-            self.follower.tell({'username': user})
+            self.next_follower.tell({'username': username})
+
+
+class Printer(pykka.ThreadingActor):
+
+    def __init__(self):
+        super(Printer, self).__init__()
+        self.number_printed = 0
+
+    def on_receive(self, message):
+        try:
+            username = message['username']
+        except:
+            pass
+
+        self.number_printed += 1
+        print '{}{}{}\t{}'.format(bcolors.OKGREEN, self.number_printed, bcolors.ENDC, username)
 
