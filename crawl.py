@@ -3,12 +3,6 @@ import pykka
 from resources import UserFinder, UserFollower, Printer
 
 
-def stop():
-    print ''
-    print 'Error detected. Ending Crawl'
-    pykka.ActorRegistry.stop_all()
-    sys.exit(0)
-
 def main():
 
     number_of_followers = 2
@@ -20,19 +14,18 @@ def main():
     printer = Printer.start()
 
     if number_of_followers > 1:
-        first_follower = UserFollower.start(printer=printer, exit_function=stop)
+        # Log in one follower and use it cookes for all the others
+        first_follower = UserFollower.start(printer=printer)
         cookiejar = first_follower.proxy().br.get()._ua_handlers['_cookies'].cookiejar
         followers = [UserFollower.start(
-            cookies=cookiejar, printer=printer, exit_function=stop) for _ in range(number_of_followers-1)]
+            cookies=cookiejar, printer=printer) for _ in range(number_of_followers-1)]
         followers.append(first_follower)
     else:
-        followers = [UserFollower.start(printer=printer, exit_function=stop)]
-
-
+        followers = [UserFollower.start(printer=printer)]
 
     print 'starting crawl'
-    finder = UserFinder.start(followers=followers)
-    finder.proxy().begin()
+    for i in range(2):
+        finder = UserFinder.start(followers=followers)
 
 if __name__ == '__main__':
     main()

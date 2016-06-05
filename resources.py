@@ -1,4 +1,6 @@
+# Classes and functions for poshmark crawling
 import os
+import traceback
 import mechanize
 import pykka
 
@@ -9,9 +11,9 @@ login_URL = main_URL + 'login'
 parties_URL = main_URL + 'parties'
 user_URL = main_URL + 'user'
 
+# Utility Functions
 def noop():
     pass
-
 
 def make_br():
     br = mechanize.Browser()
@@ -21,6 +23,7 @@ def make_br():
 
 
 class bcolors:
+    # Terminal colors
     HEADER = '\033[95m'
     OKBLUE = '\033[94m'
     OKGREEN = '\033[92m'
@@ -32,14 +35,20 @@ class bcolors:
 
 
 class UserFollower(pykka.ThreadingActor):
+    """
+    Actor for following Poshmark users.
+    """
 
-    def __init__(self, printer, cookies=None, exit_function=noop):
-        super(UserFollower, self).__init__()
+    def __init__(self, printer=None, cookies=None, **kwargs):
+        """
+        :param printer: reference to Printer actor, for output.
+        :param cookies: a Cookiejar containing a Poshmark login cookie.
+        """
+        super(UserFollower, self).__init__(kwargs)
 
         self.br = make_br()
         self.followed_users = set()
         self.printer = printer
-        self.exit_function = exit_function
 
         if cookies:
             self.br.set_cookiejar(cookies)
@@ -58,42 +67,53 @@ class UserFollower(pykka.ThreadingActor):
             print 'Logged in UserFollower'
 
     def on_receive(self, message):
-        try:
-            username = message['username']
-        except:
-            print 'invalid message to UserFollower: ' + message
+        username = message['username']
         if username not in self.followed_users:
             self.follow_user(message['username'])
+
+    def on_failure(self, e_type, e_value, tb):
+        if '403' in str(e_value):
+            print 'Locked Out: go to Poshmark manually to certify you are human!'
+        elif '429' in str(e_value):
+            print 'Too many requests: wait a while or use fewer UserFollowers'
+        else:
+            print str(e_value)
+            traceback.print_tb(tb)
+        pykka.ActorRegistry.stop_all()
+        os._exit()
 
     def follow_user(self, user):
         followers_url = user_URL + '/' + user + '/' + 'followers'
         self.br.open(followers_url)
 
         if self.br.links(text_regex='^Follow$'):
-            try:
-                self.br.follow_link(text_regex='^Follow$', nr=1)
-            except Exception as e:
-                if '403' in str(e):
-                    print 'Locked out - go to Poshmark and certify you are human!'
-                else:
-                    print str(e)
-                self.exit_function()
-                return
-
+            self.br.follow_link(text_regex='^Follow$', nr=1)
         else:
             print 'no follow link'
 
         self.followed_users.add(user)
-        self.printer.tell({'username': user})
+        if self.printer:
+            self.printer.tell({'username': user})
+        else:
+            print user
 
 
 class UserFinder(pykka.ThreadingActor):
+    """
+    Finds usernames on Poshmark.
+    """
 
-    def __init__(self, followers):
-        super(UserFinder, self).__init__()
+    def __init__(self, followers, **kwargs):
+        """
+        :param followers: a list of references to UserFollowers,
+            which follow the users found by this actor.
+        """
+        super(UserFinder, self).__init__(kwargs)
         self.br = make_br()
         self.followers = followers
         self.curr_follower = 0
+
+        self.begin()
 
     @property
     def next_follower(self):
@@ -106,13 +126,7 @@ class UserFinder(pykka.ThreadingActor):
         party_links = self.br.links(text_regex='.*Party.*')
         for link in list(party_links):
             for user in self.get_usernames(link):
-                try:
-                    self.send_user(user)
-                except:
-                    print ''
-                    print 'ERROR'
-                    print 'Could not follow ' + user
-                    print 'Log on to poshmark and tell them you are human (heh)'
+                self.send_user(user)
 
     def get_usernames(self, link):
         # find all the usernames at a URL and send them to the follower
