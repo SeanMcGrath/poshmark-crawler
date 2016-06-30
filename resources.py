@@ -1,5 +1,6 @@
 # Classes and functions for poshmark crawling
 import os
+import random
 import traceback
 import mechanize
 import pykka
@@ -123,8 +124,9 @@ class UserFinder(pykka.ThreadingActor):
 
     def begin(self):
         self.br.open(parties_URL)
-        party_links = self.br.links(text_regex='.*Party.*')
-        for link in list(party_links):
+        party_links = list(self.br.links(text_regex='.*Party.*'))
+        random.shuffle(party_links)
+        for link in party_links:
             for user in self.get_usernames(link):
                 self.send_user(user)
 
