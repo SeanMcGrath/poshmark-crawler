@@ -64,8 +64,12 @@ class UserFollower(pykka.ThreadingActor):
             self.br.select_form(nr=2)
             self.br['login_form[username_email]'] = POSHMARK_USER
             self.br['login_form[password]'] = POSHMARK_PASS
-            self.br.submit()
-            print 'Logged in UserFollower'
+            cookiejar = self.br._ua_handlers['_cookies'].cookiejar
+            log_in_response = self.br.submit().read()
+            if 'Invalid Username or Password' in log_in_response:
+                print 'Failed to Log in'
+            else:
+                print 'Logged in UserFollower'
 
     def on_receive(self, message):
         username = message['username']
