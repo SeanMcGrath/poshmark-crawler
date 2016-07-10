@@ -4,6 +4,7 @@ import random
 import traceback
 import mechanize
 import pykka
+import datetime
 
 
 # Static URLs
@@ -167,9 +168,15 @@ class Printer(pykka.ThreadingActor):
     def on_receive(self, message):
         try:
             username = message['username']
+            self.number_printed += 1
         except:
             pass
+        
+        self.msg_print(username)
 
-        self.number_printed += 1
-        print '{}{}{}\t{}'.format(bcolors.OKGREEN, self.number_printed, bcolors.ENDC, username)
+    def msg_print(self, username):
+        print '{}{}{}\t{:>20}\t\t{:>20}'.format(bcolors.OKGREEN, self.number_printed, bcolors.ENDC, username, self.timestamp())
+
+    def timestamp(self):
+        return '{:%Y-%m-%d %H:%M:%S}'.format(datetime.datetime.now())
 
